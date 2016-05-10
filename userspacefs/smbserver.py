@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 
-# This file is part of dropboxfs.
+# This file is part of userspacefs.
 
-# dropboxfs is free software: you can redistribute it and/or modify
+# userspacefs is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
 
-# dropboxfs is distributed in the hope that it will be useful,
+# userspacefs is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 
 # You should have received a copy of the GNU General Public License
-# along with dropboxfs.  If not, see <http://www.gnu.org/licenses/>.
+# along with userspacefs.  If not, see <http://www.gnu.org/licenses/>.
 
 import asyncio
 import contextlib
@@ -30,7 +30,7 @@ from collections import defaultdict, namedtuple
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from dropboxfs.util_dumpster import quick_container
+from userspacefs.util_dumpster import quick_container
 
 log = logging.getLogger(__name__)
 
@@ -1847,7 +1847,7 @@ def handle_request(server, server_capabilities, cs, backend, req):
         header = reply_header_from_request(req, uid=uid)
         parameters = quick_container(action=1,
                                      **DEFAULT_ANDX_PARAMETERS)
-        data = quick_container(native_os='Unix', native_lan_man='DropboxFS',
+        data = quick_container(native_os='Unix', native_lan_man='userspacefs',
                                primary_domain=req.data.primary_domain)
         return SMBMessage(header, parameters, data)
     elif req.header.command == SMB_COM_TREE_CONNECT_ANDX:
@@ -2879,7 +2879,7 @@ def main(argv):
     logging.basicConfig(level=logging.DEBUG)
 
     # This runtime import is okay because it happens in main()
-    from dropboxfs.memoryfs import FileSystem as MemoryFileSystem
+    from userspacefs.memoryfs import FileSystem as MemoryFileSystem
 
     fs = MemoryFileSystem([("foo", {"type": "directory",
                                     "children" : [
