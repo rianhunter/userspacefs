@@ -17,30 +17,31 @@
 
 import itertools
 
-def file_name_norm(s):
-    return s.lower()
-
 # NB: this acts like a pathlib PurePath object
 class Path(object):
-    def __init__(self, comps):
+    def __init__(self, comps, fn_norm=None):
         comps = tuple(comps)
         assert all(type(comp) is str for comp in comps)
         self._comps = comps
+        if fn_norm is None:
+            fn_norm = lambda x: x
+        self._fn_norm = fn_norm
 
     @classmethod
-    def root_path(cls):
-        return cls([])
+    def root_path(cls, fn_norm=None):
+        return cls([], fn_norm=fn_norm)
 
     @classmethod
-    def parse_path(cls, p):
-        root = cls.root_path()
+    def parse_path(cls, p, fn_norm=None):
+        root = cls.root_path(fn_norm=fn_norm)
         if p == "/":
             return root
         return root.joinpath(*p[1:].split("/"))
 
     def joinpath(self, *comps):
         assert all(a for a in comps), "empty path components are  not allowed!"
-        return self.__class__(itertools.chain(self._comps, comps))
+        return self.__class__(itertools.chain(self._comps, comps),
+                              fn_norm=self._fn_norm)
 
     @property
     def parts(self):
@@ -54,7 +55,7 @@ class Path(object):
         return 'Path' + str(self)
 
     def _norm(self):
-        return tuple(map(file_name_norm, self._comps))
+        return tuple(map(self._fn_norm, self._comps))
 
     def __eq__(self, other):
         return self._norm() == other._norm()
@@ -73,10 +74,10 @@ class Path(object):
     @property
     def parent(self):
         if not self._comps: return self
-        return Path(self._comps[:-1])
+        return Path(self._comps[:-1], fn_norm=self._fn_norm)
 
     def normed(self):
-        return Path(self._norm())
+        return Path(self._norm(), fn_norm=self._fn_norm)
 
     def with_name(self, new_name):
         return self.parent / new_name
