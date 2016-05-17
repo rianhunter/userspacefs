@@ -137,7 +137,8 @@ class _Directory(object):
     def __next__(self):
         return next(self._iter)
 
-_Stat = collections.namedtuple("Stat", ['name', 'mtime', 'type', 'size', 'id', 'ctime', 'rev'])
+ATTRS = ['name', 'mtime', 'type', 'size', 'id', 'ctime', 'rev']
+_Stat = collections.namedtuple("Stat", ATTRS + ['attrs'])
 
 class _ReadStream(PositionIO):
     def __init__(self, data):
@@ -235,7 +236,8 @@ class FileSystem(object):
         size = get_size(md)
         rev = get_rev(md)
 
-        return _Stat(name, mtime, type, size, id=get_id(md), ctime=ctime, rev=rev)
+        return _Stat(name, mtime, type, size, id=get_id(md), ctime=ctime, rev=rev,
+                     attrs=ATTRS)
 
     def _get_file(self, path, mode=0, remove=None, directory=False):
         assert not (remove is not None and mode),\
