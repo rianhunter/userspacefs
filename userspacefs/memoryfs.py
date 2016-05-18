@@ -102,7 +102,11 @@ class _File(PositionIO):
         if not self.writable():
             raise OSError(errno.EBADF, os.strerror(errno.EBADF))
         with self._md['lock']:
-            d = self._md["data"] = self._md['data'][:offset]
+            if offset <= len(self._md['data']):
+                d = self._md["data"] = self._md['data'][:offset]
+            else:
+                d = self._md["data"] = (self._md['data'] +
+                                        b'\0' * (offset - len(self._md['data'])))
             m = self._md['mtime'] = datetime.utcnow()
             self._md['ctime'] = datetime.utcnow()
             self._md['revs'].append((m, d))
