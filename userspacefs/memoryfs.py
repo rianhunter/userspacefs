@@ -170,16 +170,13 @@ class _WriteStream(object):
 
     def close(self):
         # this reads a snapshotted file resolved by resolver
-        try:
-            if isinstance(self._resolver, Path):
-                md = self._fs._get_file(self._resolver)
-            else:
-                md = self._fs._md_from_id(self._resolver)
-        except FileNotFoundError:
-            pass
-        else:
+        if isinstance(self._resolver, Path):
+            mode = os.O_CREAT
             if self._write_mode == "add":
-                raise Exception("Conflict!")
+                mode = mode | os.O_EXCL
+            md = self._fs._get_file(self._resolver, mode=mode)
+        else:
+            md = self._fs._md_from_id(self._resolver)
 
         with md['lock']:
             d = md['data'] = self._buf.getvalue()
