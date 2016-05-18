@@ -199,7 +199,7 @@ class _WriteStream(object):
                          rev=rev)
 
 class FileSystem(object):
-    def __init__(self, tree):
+    def __init__(self, tree=()):
         self._unlinked_files = []
         self._parent = {"type": "directory", "children": [],
                         'lock': threading.Lock(),
