@@ -307,10 +307,13 @@ class FileSystem(object):
         return parent
 
     def parse_path(self, path):
-        return Path.parse_path(path)
+        return Path.parse_path(path, fn_norm=self.file_name_norm)
 
     def create_path(self, *args):
-        return Path.root_path().joinpath(*args)
+        return Path.root_path(fn_norm=self.file_name_norm).joinpath(*args)
+
+    def file_name_norm(self, fn):
+        return fn.lower()
 
     def open(self, path, mode=os.O_RDONLY, directory=False):
         md = self._get_file(path, mode, directory=directory)
