@@ -1605,13 +1605,20 @@ class SMBClientHandler(object):
         ret = self._open_files[fid]
         if ret['closing'] is not None: raise KeyError()
 
-        changes_future = asyncio.Future(loop=self._loop)
-        stop_new_watch = fs.create_watch(changes_future.set_result, ret['handle'],
+        changes_event = asyncio.Event(loop=self._loop)
+        changes = []
+        def handle_changes(changes_):
+            changes.extend(changes_)
+            changes_event.set()
+
+        stop_new_watch = fs.create_watch(handle_changes, ret['handle'],
                                          *n, **kw)
 
         ret['ref'] += 1
 
-        (done, pending) = yield from asyncio.wait([changes_future,
+        wait_for_changes = asyncio.async(changes_event.wait(), loop=self._loop)
+
+        (done, pending) = yield from asyncio.wait([wait_for_changes,
                                                    ret['is_closing']],
                                                   return_when=asyncio.FIRST_COMPLETED,
                                                   loop=self._loop)
@@ -1619,9 +1626,7 @@ class SMBClientHandler(object):
         assert (fid in self._open_files and
                 self._open_files[fid] is ret)
 
-        changes = []
-        if changes_future in done:
-            changes = changes_future.result()
+        wait_for_changes.cancel()
 
         ret['ref'] -= 1
         if (ret['closing'] is not None and
