@@ -1644,7 +1644,14 @@ class SMBClientHandler(object):
         # Signal EOF
         if not data: return None
         (length,) = struct.unpack(">I", data)
-        return (yield from reader.read(length))
+        out = []
+        while length:
+            data = (yield from reader.read(length))
+            if not data:
+                raise Exception("Unexpected EOF")
+            out.append(data)
+            length -= len(data)
+        return b''.join(out)
 
     @classmethod
     @asyncio.coroutine
