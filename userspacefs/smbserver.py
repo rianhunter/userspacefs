@@ -392,9 +392,11 @@ def decode_write_andx_request_params(_, __, buf):
 def decode_write_andx_request_data(_, params, __, buf):
     # NB: skip pad byte
     if (len(buf) - 1) < params.data_length:
-        raise Exception("Not enough data!")
+        raise Exception("Not enough data! %r vs %r" %
+                        (len(buf) - 1, params.data_length))
     elif (len(buf) - 1) > params.data_length:
-        log.warn("Got more data than was expecting")
+        log.warn("Got more data than was expecting" %
+                 (len(buf) - 1, params.data_length))
     return buf[1:1 + params.data_length]
 
 decode_flush_request_params = generate_simple_params_decoder(
