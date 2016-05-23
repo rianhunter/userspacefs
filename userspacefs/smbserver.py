@@ -55,6 +55,9 @@ SMB_COM_FLUSH = 0x05
 SMB_COM_CREATE_DIRECTORY = 0x0
 SMB_COM_DELETE_DIRECTORY = 0x1
 
+SMB_COMMAND_TO_NAME = dict((v, k) for (k, v) in globals().items()
+                           if k.startswith('SMB_COM_'))
+
 SMB_FLAGS_REPLY = 0x80
 SMB_FLAGS2_NT_STATUS = 0x4000
 SMB_FLAGS2_UNICODE = 0x8000
@@ -936,6 +939,9 @@ SMB_TRANS2_QUERY_PATH_INFORMATION = 0x5
 SMB_TRANS2_QUERY_FILE_INFORMATION = 0x7
 SMB_TRANS2_SET_FILE_INFORMATION = 0x8
 
+SMB_TRANS2_TO_NAME = dict((v, k) for (k, v) in globals().items()
+                          if k.startswith('SMB_TRANS2_'))
+
 _TRANS_2_DECODERS = {
     SMB_TRANS2_FIND_FIRST2: (decode_transaction_2_find_first_request_params,
                              decode_transaction_2_find_first_request_data),
@@ -1639,6 +1645,10 @@ class SMBClientHandler(object):
 
         return changes
 
+    @asyncio.coroutine
+    def fid_to_file_name(self, fid):
+        return self._open_files[fid]['path']
+
     @classmethod
     @asyncio.coroutine
     def read_message(cls, reader):
@@ -1739,16 +1749,55 @@ class SMBClientHandler(object):
                         # kick off concurrent request handler
                         @asyncio.coroutine
                         def real_handle_request(header, payload):
+                            msg = None
                             try:
                                 (parameters, data) = decode_smb_payload(header, payload)
                                 msg = SMBMessage(header, parameters, data)
+
+                                try:
+                                    fn = msg.data.filename
+                                except AttributeError:
+                                    try:
+                                        fn = yield from self.fid_to_file_name(msg.parameters.fid)
+                                        fn = '0x%x:%s' % (msg.parameters.fid, fn)
+                                    except AttributeError:
+                                        fn = ''
+                                    except KeyError:
+                                        fn = '<invalid-fid>'
+
                                 ret = yield from handle_request(server, server_capabilities,
                                                                 self, backend, msg)
+
+                                if header.command != SMB_COM_TRANSACTION2:
+                                    fid_ = 0
+                                    if header.command == SMB_COM_NT_CREATE_ANDX:
+                                        fid_ = ret.parameters.fid
+                                    log.debug("Handled request: %s %r 0x%x",
+                                              SMB_COMMAND_TO_NAME[header.command],
+                                              fn, 
+                                              fid_)
+
                                 ret = encode_smb_message(ret)
                             except ProtocolError as e:
                                 if e.error not in (STATUS_NO_SUCH_FILE,):
-                                    log.debug("Protocol Error!!! Command:0x%x %r",
-                                              header.command, e)
+                                    try:
+                                        fn = msg.data.filename
+                                    except AttributeError:
+                                        try:
+                                            fn = yield from self.fid_to_file_name(msg.parameters.fid)
+                                            fn = '0x%x:%s' % (msg.parameters.fid, fn)
+                                        except AttributeError:
+                                            fn = ''
+                                        except KeyError:
+                                            fn = '<invalid-fid>'
+
+                                    try:
+                                        command_name = SMB_COMMAND_TO_NAME[header.command]
+                                    except KeyError:
+                                        command_name = '0x%x' % (header.command,)
+
+                                    log.error("Failed request: %s %r %r",
+                                              command_name, fn, e)
                                 ret = encode_smb_message(error_response(header, e.error))
                             except Exception:
                                 log.exception("Unexpected exception!")
@@ -2011,6 +2060,20 @@ def handle_request(server, server_capabilities, cs, backend, req):
                         buffered_entries, buffered_entries_idx)
 
             MAX_ALIGNMENT_PADDING = 6
+
+            try:
+                fn = trans2_params.filename
+            except AttributeError:
+                try:
+                    fn = yield from cs.fid_to_file_name(trans2_params.fid)
+                    fn = '0x%x:%s' % (trans2_params.fid, fn)
+                except AttributeError:
+                    fn = ''
+                except KeyError:
+                    fn = '<invalid-fid>'
+
+            log.debug("Handled request: %s %r",
+                      SMB_TRANS2_TO_NAME[trans2_type], fn)
 
             # go through another layer of parsing
             if trans2_type == SMB_TRANS2_FIND_FIRST2:
@@ -2429,8 +2492,6 @@ def handle_request(server, server_capabilities, cs, backend, req):
 
             md2 = normalize_stat(md)
 
-            log.debug("Opening file_path: %r, %r", file_path, fid)
-
             parameters = quick_container(op_lock_level=0,
                                          fid=fid,
                                          create_disposition=header.create_disposition,
@@ -2456,20 +2517,12 @@ def handle_request(server, server_capabilities, cs, backend, req):
         yield from cs.verify_uid(req)
         fs = yield from cs.verify_tid(req)
         try:
-            log.debug("About to read file... %r", request.fid)
-
             try:
                 fid_md = yield from cs.ref_file(request.fid)
             except KeyError:
                 raise ProtocolError(STATUS_INVALID_HANDLE)
             try:
-                log.debug("About to do pread... %r, offset: %r, amt: %r",
-                          fid_md['path'], request.offset,
-                          request.max_count_of_bytes_to_return)
-
                 buf = yield from fs.pread(fid_md['handle'], request.max_count_of_bytes_to_return, request.offset)
-
-                log.debug("PREAD DONE... %r buf len: %r", fid_md['path'], len(buf))
             finally:
                 yield from cs.deref_file(request.fid)
 
@@ -2486,8 +2539,6 @@ def handle_request(server, server_capabilities, cs, backend, req):
         yield from cs.verify_uid(req)
         fs = yield from cs.verify_tid(req)
         try:
-            log.debug("CLOSE FILE... %r", request.fid)
-
             try:
                 fidmd = yield from cs.destroy_file(request.fid)
                 assert 'handle' in fidmd
@@ -2499,8 +2550,6 @@ def handle_request(server, server_capabilities, cs, backend, req):
                 log.warning("Closing %r failed!", fidmd['handle'])
             asyncio.async(cant_fail(on_fail, fidmd['handle'].close()),
                           loop=cs._loop)
-
-            log.debug("CLose done! %r", request.fid)
 
             return SMBMessage(reply_header_from_request(req), None, None)
         finally:
@@ -2520,16 +2569,10 @@ def handle_request(server, server_capabilities, cs, backend, req):
                     nt_transact_setup.watch_tree,
                     )
 
-                log.debug("COMPLETION_FILTER: %x", completion_filter)
-                log.debug("FID: %r", fid)
-                log.debug("WATCH_TREE: %r", watch_tree)
-
                 try:
                     changes = yield from cs.watch_file(fid, fs, completion_filter, watch_tree)
                 except KeyError:
                     raise ProtocolError(STATUS_INVALID_HANDLE)
-
-                log.debug("CHANGES: %r %r", fid, changes)
 
                 if changes == 'reset':
                     raise ProtocolError(STATUS_NOTIFY_ENUM_DIR)
@@ -2587,10 +2630,6 @@ def handle_request(server, server_capabilities, cs, backend, req):
             except KeyError:
                 raise ProtocolError(STATUS_INVALID_HANDLE)
             try:
-                log.debug("PWRITE START... %r, offset: %r, amt: %r",
-                          fid_md['path'], req.parameters.offset,
-                          req.parameters.data_length)
-
                 if req.parameters.timeout:
                     log.warning("Got timeout value for SMB_COM_WRITE: %r, ignoring...",
                                 req.parameters.timeout)
@@ -2600,8 +2639,6 @@ def handle_request(server, server_capabilities, cs, backend, req):
                 WRITE_THROUGH_MODE = 0x1
                 if req.parameters.write_mode & WRITE_THROUGH_MODE:
                     yield from fs.fsync(fid_md['handle'])
-
-                log.debug("PWRITE DONE... %r buf len: %r", fid_md['path'], amt)
             finally:
                 yield from cs.deref_file(req.parameters.fid)
 
@@ -2721,7 +2758,6 @@ def handle_request(server, server_capabilities, cs, backend, req):
         finally:
             yield from cs.deref_tid(req.header.tid)
 
-    log.debug("%s", req)
     raise ProtocolError(STATUS_NOT_SUPPORTED)
 
 def set_fd_non_blocking(fd, val):
