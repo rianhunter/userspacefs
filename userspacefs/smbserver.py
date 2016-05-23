@@ -901,11 +901,13 @@ def win32_to_datetime(ft):
     return datetime.utcfromtimestamp(ts)
 
 def parse_set_file_data(trans2_params, buf):
-    if trans2_params.information_level == SMB_SET_FILE_END_OF_FILE_INFO:
+    if trans2_params.information_level in (SMB_SET_FILE_END_OF_FILE_INFO,
+                                           SMB_SET_FILE_END_OF_FILE_INFORMATION):
         fmt = "<Q"
         (end_of_file,) = struct.unpack(fmt, buf)
         return quick_container(end_of_file=end_of_file)
-    elif trans2_params.information_level == SMB_SET_FILE_BASIC_INFO:
+    elif trans2_params.information_level in (SMB_SET_FILE_BASIC_INFO,
+                                             SMB_SET_FILE_BASIC_INFORMATION):
         fmt = "<QQQQLL"
         fmt_size = struct.calcsize(fmt)
         (creation_time, last_access_time,
@@ -1117,6 +1119,8 @@ DEFAULT_ANDX_PARAMETERS = dict(andx_command=0xff,
 
 SMB_SET_FILE_END_OF_FILE_INFO = 0x104
 SMB_SET_FILE_BASIC_INFO = 0x101
+SMB_SET_FILE_END_OF_FILE_INFORMATION = 1020
+SMB_SET_FILE_BASIC_INFORMATION = 1004
 
 def encode_smb_datetime(dt):
     log.debug("date is %r", dt)
@@ -1690,6 +1694,13 @@ class SMBClientHandler(object):
                                CAP_STATUS32 |
                                CAP_NT_SMBS |
                                CAP_NT_FIND)
+
+        # NB: we don't fully support passthrough but we need to say
+        #     we do to get the smbfs on darwin to rename open files
+        #     (instead of failing fast with EBUSY)
+        #     (don't ask how long it took to figure that out)
+        server_capabilities = (server_capabilities |
+                               CAP_INFOLEVEL_PASSTHRU)
 
         # win32 time
         now = datetime.utcnow()
@@ -2333,13 +2344,15 @@ def handle_request(server, server_capabilities, cs, backend, req):
                 except KeyError:
                     raise ProtocolError(STATUS_INVALID_HANDLE)
                 try:
-                    if trans2_params.information_level == SMB_SET_FILE_BASIC_INFO:
+                    if trans2_params.information_level in (SMB_SET_FILE_BASIC_INFO,
+                                                           SMB_SET_FILE_BASIC_INFORMATION):
                         # TODO: implement this
                         # NB: this call is advisory and can be ignored per
                         #     SetFileTime documentation, e.g. FAT can't record
                         #     these times.
                         pass
-                    elif trans2_params.information_level == SMB_SET_FILE_END_OF_FILE_INFO:
+                    elif trans2_params.information_level in (SMB_SET_FILE_END_OF_FILE_INFO,
+                                                             SMB_SET_FILE_END_OF_FILE_INFORMATION):
                         yield from fs.ftruncate(fid_md['handle'], trans2_data.end_of_file)
                     else:
                         raise ProtocolError(STATUS_OS2_INVALID_LEVEL,
