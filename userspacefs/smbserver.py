@@ -1866,18 +1866,17 @@ def handle_request(server, server_capabilities, cs, backend, req):
         return (yield from fs.create_path(*comps))
 
     def normalize_stat(stat):
-        class MyEntry(object): pass
-        mystat = MyEntry()
+        kw = {}
 
-        mystat.birthtime = getattr(stat, "birthtime", datetime.utcfromtimestamp(0))
-        mystat.mtime = getattr(stat, "mtime", mystat.birthtime)
-        mystat.ctime = getattr(stat, "ctime", mystat.mtime)
-        mystat.atime = getattr(stat, "atime", mystat.ctime)
+        kw['birthtime'] = getattr(stat, "birthtime", datetime.utcfromtimestamp(0))
+        kw['mtime'] = getattr(stat, "mtime", kw['birthtime'])
+        kw['ctime'] = getattr(stat, "ctime", kw['mtime'])
+        kw['atime'] = getattr(stat, "atime", kw['ctime'])
 
-        mystat.type = getattr(stat, "type")
-        mystat.size = getattr(stat, "size")
+        kw['type'] = getattr(stat, "type")
+        kw['size'] = getattr(stat, "size")
 
-        return mystat
+        return quick_container(**kw)
 
     @asyncio.coroutine
     def normalize_dir_entry(entry):
