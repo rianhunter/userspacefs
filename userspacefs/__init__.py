@@ -156,6 +156,7 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
                 pass
             else:
                 if r:
+                    log.debug("Setting is_mounted!")
                     is_mounted = True
                 else:
                     log.debug("Got kill flag!")
