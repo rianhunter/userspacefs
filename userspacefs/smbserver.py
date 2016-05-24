@@ -1807,7 +1807,7 @@ class SMBClientHandler(object):
                                     except KeyError:
                                         command_name = '0x%x' % (header.command,)
 
-                                    log.error("Failed request: %s %r %r",
+                                    log.debug("Failed request: %s %r %r",
                                               command_name, fn, e)
                                 ret = encode_smb_message(error_response(header, e.error))
                             except Exception:
@@ -2364,7 +2364,7 @@ def handle_request(server, server_capabilities, cs, backend, req):
                 data_bytes = b''
                 params_bytes = b''
             else:
-                log.warning("TRANS2 Sub command not supported: %02x, %s" % (trans2_type, req))
+                log.info("TRANS2 Sub command not supported: %02x, %s" % (trans2_type, req))
                 raise ProtocolError(STATUS_NOT_SUPPORTED)
 
             assert len(setup) * 2 <= req.parameters.max_setup_count, "TRANSACTION2 setup bytes count is too large %r vs required %r" % (len(setup) * 2, req.parameters.max_setup_count)
@@ -2436,7 +2436,7 @@ def handle_request(server, server_capabilities, cs, backend, req):
             elif wants_write:
                 mode = mode | os.O_WRONLY
             else:
-                log.warn("Isn't requesting any READ/WRITE privileges: 0x%x", header.desired_access)
+                log.info("Isn't requesting any READ/WRITE privileges: 0x%x", header.desired_access)
 
             # we don't support supersede for now
             if header.create_disposition == FILE_SUPERSEDE:
@@ -2643,8 +2643,8 @@ def handle_request(server, server_capabilities, cs, backend, req):
                 raise ProtocolError(STATUS_INVALID_HANDLE)
             try:
                 if req.parameters.timeout:
-                    log.warning("Got timeout value for SMB_COM_WRITE: %r, ignoring...",
-                                req.parameters.timeout)
+                    log.info("Got timeout value for SMB_COM_WRITE: %r, ignoring...",
+                             req.parameters.timeout)
 
                 amt = yield from fs.pwrite(fid_md['handle'], req.data, req.parameters.offset)
 
