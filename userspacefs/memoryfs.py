@@ -141,6 +141,12 @@ class _Directory(object):
     def __next__(self):
         return next(self._iter)
 
+    def readmany(self, size=None):
+        if size is None:
+            return list(self)
+        else:
+            return list(itertools.islice(self, size))
+
 ATTRS = ['name', 'mtime', 'type', 'size', 'id', 'ctime', 'rev']
 _Stat = collections.namedtuple("Stat", ATTRS + ['attrs'])
 
@@ -451,3 +457,6 @@ class FileSystem(object):
 
     def ftruncate(self, handle, offset):
         return handle.ptruncate(offset)
+
+    def fsync(self, _):
+        pass
