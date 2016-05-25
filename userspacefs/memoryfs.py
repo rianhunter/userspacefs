@@ -460,3 +460,10 @@ class FileSystem(object):
 
     def fsync(self, _):
         pass
+
+    def x_f_set_file_times(self, handle, creation_time, last_access_time,
+                           last_write_time, change_time):
+        if change_time is not None:
+            handle._md['ctime'] = change_time
+        if last_write_time is not None:
+            handle._md['mtime'] = last_write_time
