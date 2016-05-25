@@ -26,16 +26,20 @@ import threading
 import stat
 import sys
 
-from fuse import FUSE
+from fuse import FUSE, LoggingMixIn
 
 from userspacefs.util_dumpster import utctimestamp
 
 log = logging.getLogger(__name__)
 
+class AttrCaller(object):
+    def __call__(self, op, *args):
+        return getattr(self, op)(*args)
+
 # Can't derive from fuse.Operations because Finder will
 # fail to copy if getxattr() returns ENOTSUP, better to
 # not implement it at all
-class FUSEAdapter(object):
+class FUSEAdapter(LoggingMixIn, AttrCaller):
     flag_nopath = 1
 
     def __init__(self, create_fs):
@@ -179,9 +183,6 @@ class FUSEAdapter(object):
         toret['f_bsize'] = toret['f_frsize']
 
         return toret
-
-    def __call__(self, op, *args):
-        return getattr(self, op)(*args)
 
 def run_fuse_mount(create_fs, mount_point, foreground=False, display_name=None, fsname=None):
     kw = {}
