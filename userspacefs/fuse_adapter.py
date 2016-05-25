@@ -171,6 +171,18 @@ class FUSEAdapter(LoggingMixIn, AttrCaller):
         return 0
 
     def utimens(self, path, times=None):
+        try:
+            fn = self._fs.x_f_set_file_times
+        except AttributeError:
+            # NB: x_f_set_file_times is an optional call
+            return 0
+
+        with contextlib.closing(self._fs.open(self._conv_path(path), os.O_RDONLY)) as f:
+            fn(f,
+               None,
+               None if times is None else datetime.datetime.utcfromtimestamp(times[0]),
+               None if times is None else datetime.datetime.utcfromtimestamp(times[1]),
+               None)
         return 0
 
     def statfs(self, _):
