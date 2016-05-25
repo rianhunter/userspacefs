@@ -2345,11 +2345,24 @@ def handle_request(server, server_capabilities, cs, backend, req):
                 try:
                     if trans2_params.information_level in (SMB_SET_FILE_BASIC_INFO,
                                                            SMB_SET_FILE_BASIC_INFORMATION):
-                        # TODO: implement this
                         # NB: this call is advisory and can be ignored per
                         #     SetFileTime documentation, e.g. FAT can't record
                         #     these times.
-                        pass
+                        try:
+                            def tt(f):
+                                # TODO: support 2 ** 64 - 1
+                                # set 'sticky time' for file handle per samba
+                                if f in (0, 2 ** 64 - 1):
+                                    return None
+                                return win32_to_datetime(f)
+                            yield from fs.x_f_set_file_times(fid_md['handle'],
+                                                             tt(trans2_data.creation_time),
+                                                             tt(trans2_data.last_access_time),
+                                                             tt(trans2_data.last_write_time),
+                                                             tt(trans2_data.change_time))
+                        except AttributeError:
+                            # fs doesn't support call, that's fine
+                            pass
                     elif trans2_params.information_level in (SMB_SET_FILE_END_OF_FILE_INFO,
                                                              SMB_SET_FILE_END_OF_FILE_INFORMATION):
                         yield from fs.ftruncate(fid_md['handle'], trans2_data.end_of_file)
@@ -2839,6 +2852,12 @@ class AsyncFS(AsyncWrapped):
     def ftruncate(self, handle, *n, **kw):
         # NB: we have to unwrap the async handle
         return (yield from self._worker_pool.run_async(self._obj.ftruncate,
+                                                       handle._obj, *n, **kw))
+
+    @asyncio.coroutine
+    def x_f_set_file_times(self, handle, *n, **kw):
+        # NB: we have to unwrap the async handle
+        return (yield from self._worker_pool.run_async(self._obj.x_f_set_file_times,
                                                        handle._obj, *n, **kw))
 
     def create_watch(self, cb, dir_handle, *n, **kw):
