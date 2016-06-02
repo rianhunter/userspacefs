@@ -243,7 +243,7 @@ SMBTransaction2RequestParameters = namedtuple(
      'parameter_count', 'parameter_offset',
      'data_count', 'data_offset', 'setup'])
 def decode_transaction_2_request_params(_, __, buf):
-    fmt = 'HHHHBBHIHHHHHH'
+    fmt = '<HHHHBBHIHHHHHH'
     fmt_size = struct.calcsize(fmt)
 
     kw = {}
