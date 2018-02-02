@@ -42,10 +42,11 @@ class AttrCaller(object):
 class FUSEAdapter(LoggingMixIn, AttrCaller):
     flag_nopath = 1
 
-    def __init__(self, create_fs):
+    def __init__(self, create_fs, on_init=None):
         self._create_fs = create_fs
         self._fh_to_file = {}
         self._lock = threading.Lock()
+        self._on_init = on_init
 
     def _save_file(self, f):
         with self._lock:
@@ -90,6 +91,8 @@ class FUSEAdapter(LoggingMixIn, AttrCaller):
         return toret
 
     def init(self, _):
+        if self._on_init is not None:
+            self._on_init()
         self._fs = self._create_fs()
 
     def getattr(self, path, fh=None):
@@ -196,9 +199,10 @@ class FUSEAdapter(LoggingMixIn, AttrCaller):
 
         return toret
 
-def run_fuse_mount(create_fs, mount_point, foreground=False, display_name=None, fsname=None):
+def run_fuse_mount(create_fs, mount_point, foreground=False, display_name=None, fsname=None, on_init=None):
     kw = {}
     if sys.platform == 'darwin':
         kw['volname'] = display_name
-    FUSE(FUSEAdapter(create_fs), mount_point, foreground=foreground, hard_remove=True,
+    FUSE(FUSEAdapter(create_fs, on_init=on_init),
+         mount_point, foreground=foreground, hard_remove=True,
          default_permissions=True, fsname=fsname, **kw)

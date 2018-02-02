@@ -74,13 +74,15 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
                      foreground=False,
                      smb_only=False,
                      smb_no_mount=False,
-                     smb_listen_address=None):
+                     smb_listen_address=None,
+                     on_new_process=None):
     mount_point = os.path.abspath(mount_point)
 
     if not smb_only and run_fuse_mount is not None:
         log.debug("Attempting fuse mount")
         run_fuse_mount(create_fs, mount_point, foreground=foreground,
-                       display_name=display_name, fsname=display_name)
+                       display_name=display_name, fsname=display_name,
+                       on_init=None if foreground else on_new_process)
         return 0
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -137,6 +139,8 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
 
         if child_pid:
             return mount_notify(child_pid)
+        elif on_new_process is not None:
+            on_new_process()
     else:
         threading.Thread(target=mount_notify, args=(os.getpid(),), daemon=True).start()
 
@@ -241,7 +245,7 @@ def add_cli_arguments(parser):
     parser.add_argument("-l", "--smb-listen-address", default="127.0.0.1", type=ensure_listen_address)
     parser.add_argument("mount_point", nargs=1)
 
-def simple_main(display_name, create_fs, args=None, argv=None):
+def simple_main(display_name, create_fs, args=None, argv=None, on_new_process=None):
     if args is None:
         if argv is None:
             argv = sys.argv
@@ -265,4 +269,5 @@ def simple_main(display_name, create_fs, args=None, argv=None):
                             foreground=args.foreground,
                             smb_only=args.smb_only,
                             smb_no_mount=args.smb_no_mount,
-                            smb_listen_address=args.smb_listen_address)
+                            smb_listen_address=args.smb_listen_address,
+                            on_new_process=on_new_process)
