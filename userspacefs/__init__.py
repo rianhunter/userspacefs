@@ -80,10 +80,14 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
 
     if not smb_only and run_fuse_mount is not None:
         log.debug("Attempting fuse mount")
-        run_fuse_mount(create_fs, mount_point, foreground=foreground,
-                       display_name=display_name, fsname=display_name,
-                       on_init=None if foreground else on_new_process)
-        return 0
+        try:
+            run_fuse_mount(create_fs, mount_point, foreground=foreground,
+                           display_name=display_name, fsname=display_name,
+                           on_init=None if foreground else on_new_process)
+            return 0
+        except RuntimeError:
+            # Fuse is broken
+            log.warn("FUSE installation is broken, falling back to SMB")
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
