@@ -1484,7 +1484,7 @@ class SMBClientHandler(object):
 
         for fid, value in self._open_files.items():
             if value['tid'] != tid: continue
-            waiting.append(asyncio.async(destroy_close_file(fid), loop=self._loop))
+            waiting.append(asyncio.ensure_future(destroy_close_file(fid), loop=self._loop))
 
         @asyncio.coroutine
         def destroy_close_search(sid):
@@ -1496,7 +1496,7 @@ class SMBClientHandler(object):
 
         for sid, value in self._open_find_trans.items():
             if value['tid'] != tid: continue
-            waiting.append(asyncio.async(destroy_close_search(sid), loop=self._loop))
+            waiting.append(asyncio.ensure_future(destroy_close_search(sid), loop=self._loop))
 
         if ret['ref']:
             # wait for all tids to be dereffed
@@ -1523,7 +1523,7 @@ class SMBClientHandler(object):
 
         waiting = []
         for tid in self._open_tids:
-            waiting.append(asyncio.async(destroy_tid(tid), loop=self._loop))
+            waiting.append(asyncio.ensure_future(destroy_tid(tid), loop=self._loop))
 
         if waiting:
             yield from asyncio.wait(waiting, loop=self._loop)
@@ -1628,7 +1628,7 @@ class SMBClientHandler(object):
 
         ret['ref'] += 1
 
-        wait_for_changes = asyncio.async(changes_event.wait(), loop=self._loop)
+        wait_for_changes = asyncio.ensure_future(changes_event.wait(), loop=self._loop)
 
         (done, pending) = yield from asyncio.wait([wait_for_changes,
                                                    ret['is_closing']],
@@ -1731,7 +1731,7 @@ class SMBClientHandler(object):
         @asyncio.coroutine
         def read_client(reader, writer_queue):
             try:
-                read_future = asyncio.async(self.read_message(reader),
+                read_future = asyncio.ensure_future(self.read_message(reader),
                                             loop=loop)
                 in_flight_requests = set()
                 while True:
@@ -1785,7 +1785,7 @@ class SMBClientHandler(object):
                                         fid_ = ret.parameters.fid
                                     log.debug("Handled request: %s %r 0x%x",
                                               SMB_COMMAND_TO_NAME[header.command],
-                                              fn, 
+                                              fn,
                                               fid_)
 
                                 ret = encode_smb_message(ret)
@@ -1816,12 +1816,12 @@ class SMBClientHandler(object):
 
                             yield from writer_queue.put(ret)
 
-                        reqfut = asyncio.async(
+                        reqfut = asyncio.ensure_future(
                             real_handle_request(header,
                                                 raw_msg[SMB_HEADER_STRUCT_SIZE:]),
                             loop=loop)
                         in_flight_requests.add(reqfut)
-                        read_future = asyncio.async(self.read_message(reader),
+                        read_future = asyncio.ensure_future(self.read_message(reader),
                                                     loop=loop)
             finally:
                 # release resources associated with connection
@@ -1844,7 +1844,7 @@ class SMBClientHandler(object):
         writer_queue = asyncio.Queue(loop=loop)
 
         # start up reader/writer coroutines
-        read_client_future = asyncio.async(read_client(reader, writer_queue),
+        read_client_future = asyncio.ensure_future(read_client(reader, writer_queue),
                                            loop=loop)
         try:
             yield from write_client(writer, writer_queue)
@@ -2573,7 +2573,7 @@ def handle_request(server, server_capabilities, cs, backend, req):
             # Close asynchronously
             def on_fail():
                 log.warning("Closing %r failed!", fidmd['handle'])
-            asyncio.async(cant_fail(on_fail, fidmd['handle'].close()),
+            asyncio.ensure_future(cant_fail(on_fail, fidmd['handle'].close()),
                           loop=cs._loop)
 
             return SMBMessage(reply_header_from_request(req), None, None)
@@ -2944,7 +2944,7 @@ class SMBServer(object):
             self._worker_pool.close()
             self._server_done.set_result(None)
 
-        asyncio.async(_on_close(), loop=self._loop)
+        asyncio.ensure_future(_on_close(), loop=self._loop)
 
     def close(self):
         @asyncio.coroutine
