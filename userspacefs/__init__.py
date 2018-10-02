@@ -246,11 +246,17 @@ def add_cli_arguments(parser):
 
         return (host, port)
 
-    parser.add_argument("-f", "--foreground", action="store_true")
-    parser.add_argument("-v", "--verbose", action="count", default=0)
-    parser.add_argument("-s", "--smb", action="store_true")
-    parser.add_argument("-n", "--smb-no-mount", action="store_true")
-    parser.add_argument("-l", "--smb-listen-address", default="127.0.0.1", type=ensure_listen_address)
+    parser.add_argument("-f", "--foreground", action="store_true",
+                        help="keep filesystem server in foreground")
+    parser.add_argument("-v", "--verbose", action="count", default=0,
+                        help="show log messages, use twice for maximum verbosity")
+    parser.add_argument("-s", "--smb", action="store_true",
+                        help="force mounting via SMB")
+    parser.add_argument("-n", "--smb-no-mount", action="store_true",
+                        help="export filesystem via SMB but don't mount it")
+    parser.add_argument("-l", "--smb-listen-address", default="127.0.0.1",
+                        type=ensure_listen_address,
+                        help="address that SMB service should listen on, append colon to specify port")
 
 def simple_main(mount_point, display_name, create_fs, args=None, argv=None, on_new_process=None):
     if args is None:
