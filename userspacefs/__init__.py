@@ -78,6 +78,10 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
                      on_new_process=None):
     mount_point = os.path.abspath(mount_point)
 
+    # smb_no_mount implies smb
+    if smb_no_mount:
+        smb_only = True
+
     if not smb_only and run_fuse_mount is not None:
         log.debug("Attempting fuse mount")
         try:
