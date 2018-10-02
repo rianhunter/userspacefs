@@ -248,7 +248,7 @@ def add_cli_arguments(parser):
 
     parser.add_argument("-f", "--foreground", action="store_true")
     parser.add_argument("-v", "--verbose", action="count", default=0)
-    parser.add_argument("-s", "--smb-only", action="store_true")
+    parser.add_argument("-s", "--smb", action="store_true")
     parser.add_argument("-n", "--smb-no-mount", action="store_true")
     parser.add_argument("-l", "--smb-listen-address", default="127.0.0.1", type=ensure_listen_address)
 
@@ -274,7 +274,7 @@ def simple_main(mount_point, display_name, create_fs, args=None, argv=None, on_n
     return mount_and_run_fs(display_name, create_fs,
                             mount_point,
                             foreground=args.foreground,
-                            smb_only=args.smb_only,
+                            smb_only=args.smb,
                             smb_no_mount=args.smb_no_mount,
                             smb_listen_address=args.smb_listen_address,
                             on_new_process=on_new_process)
