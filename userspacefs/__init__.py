@@ -71,6 +71,8 @@ class SimpleSMBBackend(object):
     def tree_disconnect_hard(self, server, fs):
         pass
 
+class MountError(Exception): pass
+
 def mount_and_run_fs(display_name, create_fs, mount_point,
                      foreground=False,
                      smb_only=False,
@@ -93,9 +95,13 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
                            display_name=display_name, fsname=display_name,
                            on_init=None if foreground else on_new_process)
             return 0
-        except RuntimeError:
-            # Fuse is broken
-            log.warn("FUSE installation is broken, falling back to SMB")
+        except RuntimeError as e:
+            # Fuse is broken, fall back to SMB
+            pass
+
+    can_mount_smb_automatically = sys.platform == "darwin"
+    if not smb_no_mount and not can_mount_smb_automatically:
+        raise MountError("Unable to mount file system")
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -125,18 +131,14 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
         def create_fs():
             return MacOSPathConversionFileSystem(orig_create_fs())
 
-    can_mount_smb_automatically = sys.platform == "darwin" and not smb_no_mount
-    if not can_mount_smb_automatically:
-        print("%s, you can access the SMB server at cifs://guest:@%s:%d/%s" %
-              ("Not mounting file system automatically"
-               if smb_no_mount else
-               "Can't mount file system automatically",
-               host,
+    if smb_no_mount:
+        print("You can access the SMB server at cifs://guest:@%s:%d/%s" %
+              (host,
                port,
                display_name))
 
     def mount_notify(child_pid):
-        if can_mount_smb_automatically:
+        if not smb_no_mount:
             ret = subprocess.call(["mount", "-t", "smbfs",
                                    "cifs://guest:@127.0.0.1:%d/%s" %
                                    (port, display_name),
@@ -286,10 +288,14 @@ def simple_main(mount_point, display_name, create_fs, args=None, argv=None, on_n
     level = [logging.WARNING, logging.INFO, logging.DEBUG][min(2, args.verbose)]
     logging.basicConfig(level=level, handlers=[logging_stream], format=format_)
 
-    return mount_and_run_fs(display_name, create_fs,
-                            mount_point,
-                            foreground=args.foreground,
-                            smb_only=args.smb,
-                            smb_no_mount=args.smb_no_mount,
-                            smb_listen_address=args.smb_listen_address,
-                            on_new_process=on_new_process)
+    try:
+        return mount_and_run_fs(display_name, create_fs,
+                                mount_point,
+                                foreground=args.foreground,
+                                smb_only=args.smb,
+                                smb_no_mount=args.smb_no_mount,
+                                smb_listen_address=args.smb_listen_address,
+                                on_new_process=on_new_process)
+    except MountError as e:
+        print(e)
+        return -1
