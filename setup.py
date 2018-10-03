@@ -17,9 +17,16 @@
 
 from setuptools import setup
 
+with open("README.md", "r") as fh:
+    long_description = fh.read()
+
 setup(
     name="userspacefs",
-    description="User-space file systems",
+    author="Rian Hunter",
+    author_email="rian@alum.mit.edu",
+    description="Cross-platform user-space file systems for Python",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
     url='https://github.com/rianhunter/userspacefs',
     license="GPL3",
     classifiers=[
