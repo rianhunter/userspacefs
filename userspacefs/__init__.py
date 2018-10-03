@@ -33,6 +33,7 @@ try:
 except EnvironmentError:
     run_fuse_mount = None
 
+from userspacefs.macos_path_conversion import FileSystem as MacOSPathConversionFileSystem
 from userspacefs.smbserver import SMBServer
 
 log = logging.getLogger(__name__)
@@ -118,6 +119,11 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
                 sock.setsockopt(socket.SOL_SOCKET, getattr(socket, prop), True)
 
         sock.bind((host, port))
+
+    if sys.platform == "darwin":
+        orig_create_fs = create_fs
+        def create_fs():
+            return MacOSPathConversionFileSystem(orig_create_fs())
 
     can_mount_smb_automatically = sys.platform == "darwin" and not smb_no_mount
     if not can_mount_smb_automatically:
