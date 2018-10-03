@@ -76,7 +76,10 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
                      smb_no_mount=False,
                      smb_listen_address=None,
                      on_new_process=None):
-    mount_point = os.path.abspath(mount_point)
+    assert smb_no_mount or mount_point is not None
+
+    if not smb_no_mount:
+        mount_point = os.path.abspath(mount_point)
 
     # smb_no_mount implies smb
     if smb_no_mount:
