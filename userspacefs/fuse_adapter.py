@@ -108,6 +108,12 @@ class FUSEAdapter(LoggingMixIn, AttrCaller):
             st = self._fs.stat(self._conv_path(path))
         return self._fs_stat_to_fuse_attrs(st)
 
+    def mknod(self, path, mode, dev):
+        # Not all fuse implementations call create()
+        check_mode(mode)
+        self._fs.open(self._conv_path(path),
+                      os.O_WRONLY | os.O_CREAT).close()
+
     def create(self, path, mode):
         check_mode(mode)
         return self._save_file(self._fs.open(self._conv_path(path),
