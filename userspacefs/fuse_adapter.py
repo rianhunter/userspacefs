@@ -36,6 +36,10 @@ class AttrCaller(object):
     def __call__(self, op, *args):
         return getattr(self, op)(*args)
 
+def check_mode(mode):
+    if ((stat.S_IFCHR | stat.S_IFBLK | stat.S_IFIFO | stat.S_IFLNK | stat.S_IFSOCK) & mode) == (stat.S_IFCHR | stat.S_IFBLK | stat.S_IFIFO | stat.S_IFLNK | stat.S_IFSOCK):
+        raise OSError(errno.EPERM, os.strerror(errno.EPERM))
+
 # Can't derive from fuse.Operations because Finder will
 # fail to copy if getxattr() returns ENOTSUP, better to
 # not implement it at all
@@ -105,6 +109,7 @@ class FUSEAdapter(LoggingMixIn, AttrCaller):
         return self._fs_stat_to_fuse_attrs(st)
 
     def create(self, path, mode):
+        check_mode(mode)
         return self._save_file(self._fs.open(self._conv_path(path),
                                              os.O_WRONLY | os.O_CREAT))
 
