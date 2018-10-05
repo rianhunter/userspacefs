@@ -137,7 +137,11 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
                port,
                display_name))
 
+    (r, w) = os.pipe()
+
     def mount_notify(child_pid):
+        # wait for server to startup before attempting mount
+        os.read(r, 1)
         if not smb_no_mount:
             ret = subprocess.call(["mount", "-t", "smbfs",
                                    "cifs://guest:@127.0.0.1:%d/%s" %
@@ -157,9 +161,12 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
         child_pid = daemonize()
 
         if child_pid:
+            os.close(w)
             return mount_notify(child_pid)
         elif on_new_process is not None:
             on_new_process()
+
+        os.close(r)
     else:
         threading.Thread(target=mount_notify, args=(os.getpid(),), daemon=True).start()
 
@@ -211,6 +218,9 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
         server = SMBServer(SimpleSMBBackend("\\\\127.0.0.1\\%s" % (display_name,),
                                             fs),
                            sock=sock)
+
+        # give mount signal
+        os.write(w, b'\0')
 
         threading.Thread(target=check_mount, daemon=True).start()
 
