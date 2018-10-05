@@ -209,10 +209,6 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
         log.debug("Got kill signal!")
         mm_q.put(False)
 
-    signal.signal(signal.SIGTERM, kill_signal)
-    signal.signal(signal.SIGINT, kill_signal)
-    signal.signal(signal.SIGUSR1, handle_mounted)
-
     fs = create_fs()
     try:
         server = SMBServer(SimpleSMBBackend("\\\\127.0.0.1\\%s" % (display_name,),
@@ -221,6 +217,11 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
 
         # give mount signal
         os.write(w, b'\0')
+
+        # enable signals now that server is set
+        signal.signal(signal.SIGTERM, kill_signal)
+        signal.signal(signal.SIGINT, kill_signal)
+        signal.signal(signal.SIGUSR1, handle_mounted)
 
         threading.Thread(target=check_mount, daemon=True).start()
 
