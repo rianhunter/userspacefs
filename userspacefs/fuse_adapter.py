@@ -99,6 +99,9 @@ class FUSEAdapter(LoggingMixIn, AttrCaller):
             self._on_init()
         self._fs = self._create_fs()
 
+    def destroy(self, _):
+        self._fs.close()
+
     def getattr(self, path, fh=None):
         if fh is not None:
             if fh not in self._fh_to_file:
