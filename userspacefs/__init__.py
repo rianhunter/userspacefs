@@ -215,13 +215,13 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
                                             fs),
                            sock=sock)
 
-        # give mount signal
-        os.write(w, b'\0')
-
         # enable signals now that server is set
         signal.signal(signal.SIGTERM, kill_signal)
         signal.signal(signal.SIGINT, kill_signal)
         signal.signal(signal.SIGUSR1, handle_mounted)
+
+        # give mount signal
+        os.write(w, b'\0')
 
         threading.Thread(target=check_mount, daemon=True).start()
 
