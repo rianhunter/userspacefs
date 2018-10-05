@@ -163,9 +163,7 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
     else:
         threading.Thread(target=mount_notify, args=(os.getpid(),), daemon=True).start()
 
-    server = SMBServer(SimpleSMBBackend("\\\\127.0.0.1\\%s" % (display_name,),
-                                        create_fs()),
-                       sock=sock)
+    server = None
 
     mm_q = queue.Queue()
     def check_mount():
@@ -195,7 +193,6 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
 
         log.debug("CALLING SERVER CLOSE")
         server.close()
-    threading.Thread(target=check_mount, daemon=True).start()
 
     def handle_mounted(self, *_):
         log.debug("Got mounted signal!")
@@ -209,7 +206,17 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
     signal.signal(signal.SIGINT, kill_signal)
     signal.signal(signal.SIGUSR1, handle_mounted)
 
-    server.run()
+    fs = create_fs()
+    try:
+        server = SMBServer(SimpleSMBBackend("\\\\127.0.0.1\\%s" % (display_name,),
+                                            fs),
+                           sock=sock)
+
+        threading.Thread(target=check_mount, daemon=True).start()
+
+        server.run()
+    finally:
+        fs.close()
 
 class RealSysLogHandler(logging.Handler):
     def __init__(self, *n, **kw):
