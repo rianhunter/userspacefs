@@ -26,7 +26,7 @@ import threading
 import stat
 import sys
 
-from fuse import FUSE, LoggingMixIn
+from fusepyng import FUSE, LoggingMixIn
 
 from userspacefs.util_dumpster import utctimestamp
 
