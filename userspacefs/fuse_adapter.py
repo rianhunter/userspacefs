@@ -51,6 +51,7 @@ class FUSEAdapter(LoggingMixIn, AttrCaller):
         self._fh_to_file = {}
         self._lock = threading.Lock()
         self._on_init = on_init
+        self._fs = None
 
     def _save_file(self, f):
         with self._lock:
@@ -100,7 +101,9 @@ class FUSEAdapter(LoggingMixIn, AttrCaller):
         self._fs = self._create_fs()
 
     def destroy(self, _):
-        self._fs.close()
+        if self._fs is not None:
+            self._fs.close()
+            self._fs = None
 
     def getattr(self, path, fh=None):
         if fh is not None:
