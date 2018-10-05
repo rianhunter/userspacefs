@@ -6,8 +6,10 @@
 # put group them into a separate file
 
 import contextlib
+import errno
 import io
 import datetime
+import os
 import threading
 
 def utctimestamp(dt):
