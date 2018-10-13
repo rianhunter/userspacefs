@@ -107,6 +107,9 @@ class FUSEAdapter(LoggingMixIn, AttrCaller):
 
     def getattr(self, path, fh=None):
         if fh is not None:
+            fh = fh.fh
+
+        if fh is not None:
             if fh not in self._fh_to_file:
                 raise Exception("Fuse passed us invalid file handle!: %r" % (fh,))
             st = self._fs.fstat(self._fh_to_file[fh])
@@ -120,23 +123,29 @@ class FUSEAdapter(LoggingMixIn, AttrCaller):
         self._fs.open(self._conv_path(path),
                       os.O_WRONLY | os.O_CREAT).close()
 
-    def create(self, path, mode):
+    def create(self, path, mode, fi):
         check_mode(mode)
-        return self._save_file(self._fs.open(self._conv_path(path),
-                                             os.O_WRONLY | os.O_CREAT))
+        fi.fh = self._save_file(self._fs.open(self._conv_path(path), fi.flags))
+        return 0
 
-    def open(self, path, flags):
-        return self._save_file(self._fs.open(self._conv_path(path), flags))
+    def open(self, path, fi):
+        fi.fh = self._save_file(self._fs.open(self._conv_path(path), fi.flags))
+        return 0
 
     def read(self, path, size, offset, fh):
+        fh = fh.fh
         f = self._fh_to_file[fh]
         return self._fs.pread(f, size, offset)
 
     def write(self, path, data, offset, fh):
+        fh = fh.fh
         f = self._fh_to_file[fh]
         return self._fs.pwrite(f, data, offset)
 
     def truncate(self, path, length, fh=None):
+        if fh is not None:
+            fh = fh.fh
+
         if fh is None:
             # TODO: add truncate() call to FS interface
             with contextlib.closing(self._fs.open(self._conv_path(path), os.O_WRONLY)) as f:
@@ -146,10 +155,12 @@ class FUSEAdapter(LoggingMixIn, AttrCaller):
             self._fs.ftruncate(f, length)
 
     def fsync(self, path, datasync, fh):
+        fh = fh.fh
         self._fs.fsync(self._fh_to_file[fh])
         return 0
 
     def release(self, path, fh):
+        fh = fh.fh
         self._delete_file(fh).close()
         return 0
 
@@ -222,4 +233,6 @@ def run_fuse_mount(create_fs, mount_point, foreground=False, display_name=None, 
         kw['volname'] = display_name
     FUSE(FUSEAdapter(create_fs, on_init=on_init),
          mount_point, foreground=foreground, hard_remove=True,
-         default_permissions=True, fsname=fsname, **kw)
+         default_permissions=True, fsname=fsname,
+         raw_fi=True,
+         **kw)
