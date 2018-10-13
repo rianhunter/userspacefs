@@ -8,6 +8,7 @@
 import contextlib
 import errno
 import io
+import itertools
 import datetime
 import os
 import threading
@@ -15,6 +16,19 @@ import threading
 def utctimestamp(dt):
     assert dt.tzinfo is None
     return dt.replace(tzinfo=datetime.timezone.utc).timestamp()
+
+class IterableDirectory(object):
+    def read(self):
+        try:
+            return next(self)
+        except StopIteration:
+            return None
+
+    def readmany(self, size=None):
+        if size is None:
+            return list(self)
+        else:
+            return list(itertools.islice(self, size))
 
 class PositionIO(io.RawIOBase):
     def __init__(self):
