@@ -37,6 +37,6 @@ setup(
     ],
     packages=["userspacefs"],
     install_requires=[
-        "fusepyng>=1,<2",
+        "fusepyng>=1.0.6,<2",
     ],
 )
