@@ -84,7 +84,7 @@ class FUSEAdapter(LoggingMixIn, AttrCaller):
 
         toret['st_mode'] = ((stat.S_IFDIR | 0o777)
                             if st.type == 'directory' else
-                            (stat.S_IFREG | 0o666))
+                            (stat.S_IFREG | 0o777))
 
         # NB: st_nlink on directories is really inconsistent across filesystems
         #     and OSes. it arguably doesn't matter at all but we set it to
