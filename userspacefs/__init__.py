@@ -78,7 +78,8 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
                      smb_only=False,
                      smb_no_mount=False,
                      smb_listen_address=None,
-                     on_new_process=None):
+                     on_new_process=None,
+                     fuse_options=None):
     assert smb_no_mount or mount_point is not None
 
     if not smb_no_mount:
@@ -91,9 +92,12 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
     if not smb_only and run_fuse_mount is not None:
         log.debug("Attempting fuse mount")
         try:
+            if fuse_options is None:
+                fuse_options = {}
             run_fuse_mount(create_fs, mount_point, foreground=foreground,
                            display_name=display_name, fsname=display_name,
-                           on_init=None if foreground else on_new_process)
+                           on_init=None if foreground else on_new_process,
+                           **fuse_options)
             return 0
         except RuntimeError as e:
             # Fuse is broken, fall back to SMB
@@ -248,6 +252,20 @@ class RealSysLogHandler(logging.Handler):
         priority = self._map_priority(record.levelno)
         syslog.syslog(priority, msg)
 
+class FUSEOption(argparse.Action):
+    def __init__(self, **kw):
+        super(FUSEOption, self).__init__(**kw)
+
+    def __call__(self, parser, ns, values, option_string):
+        if ns.o is None:
+            ns.o = {}
+        for kv in values.split(","):
+            ret = kv.split("=", 1)
+            if len(ret) == 2:
+                ns.o[ret[0]] = ret[1]
+            else:
+                ns.o[ret[0]] = True
+
 def add_cli_arguments(parser):
     def ensure_listen_address(string):
         try:
@@ -286,6 +304,8 @@ def add_cli_arguments(parser):
     parser.add_argument("-l", "--smb-listen-address", default="127.0.0.1",
                         type=ensure_listen_address,
                         help="address that SMB service should listen on, append colon to specify port")
+    parser.add_argument("-o", metavar='opt,[opt...]', action=FUSEOption,
+                        help="FUSE options, e.g. -o uid=1000,allow_other")
 
 def simple_main(mount_point, display_name, create_fs, args=None, argv=None, on_new_process=None):
     if args is None:
@@ -313,7 +333,8 @@ def simple_main(mount_point, display_name, create_fs, args=None, argv=None, on_n
                                 smb_only=args.smb,
                                 smb_no_mount=args.smb_no_mount,
                                 smb_listen_address=args.smb_listen_address,
-                                on_new_process=on_new_process)
+                                on_new_process=on_new_process,
+                                fuse_options=args.o)
     except MountError as e:
         print(e)
         return -1

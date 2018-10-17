@@ -227,8 +227,7 @@ class FUSEAdapter(LoggingMixIn, AttrCaller):
 
         return toret
 
-def run_fuse_mount(create_fs, mount_point, foreground=False, display_name=None, fsname=None, on_init=None):
-    kw = {}
+def run_fuse_mount(create_fs, mount_point, foreground=False, display_name=None, fsname=None, on_init=None, **kw):
     if sys.platform == 'darwin':
         kw['volname'] = display_name
     FUSE(FUSEAdapter(create_fs, on_init=on_init),
