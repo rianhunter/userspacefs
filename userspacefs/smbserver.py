@@ -1286,9 +1286,9 @@ INFO_GENERATORS = {
 def generate_fs_size_info(fs):
     st = yield from fs.statvfs()
     return struct.pack("<QQII",
-                       st.f_blocks, # total allocation units
-                       st.f_bavail, # total free allocation units
-                       st.f_frsize // 512, # sectors per allocation unit
+                       min(2 ** 64 - 1, st.f_blocks), # total allocation units
+                       min(2 ** 64 - 1, st.f_bavail), # total free allocation units
+                       min(2 ** 32 - 1, st.f_frsize // 512), # sectors per allocation unit
                        512, # bytes per sector
                        )
 
