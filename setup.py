@@ -22,7 +22,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name="userspacefs",
-    version='1.0.12',
+    version='1.0.13',
     author="Rian Hunter",
     author_email="rian@alum.mit.edu",
     description="Cross-platform user-space file systems for Python",
