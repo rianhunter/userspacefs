@@ -15,17 +15,19 @@
 # You should have received a copy of the GNU General Public License
 # along with userspacefs.  If not, see <http://www.gnu.org/licenses/>.
 
-import argparse
 import errno
+import functools
+import importlib
 import logging
 import os
+import pathlib
 import queue
 import random
+import re
 import signal
 import socket
 import subprocess
 import sys
-import syslog
 import threading
 
 try:
@@ -37,23 +39,6 @@ from userspacefs.macos_path_conversion import FileSystem as MacOSPathConversionF
 from userspacefs.smbserver import SMBServer
 
 log = logging.getLogger(__name__)
-
-def daemonize():
-    res = os.fork()
-    if res:
-        return res
-
-    os.setsid()
-
-    os.chdir("/")
-
-    nullfd = os.open("/dev/null", os.O_RDWR)
-    try:
-        os.dup2(nullfd, 0)
-        os.dup2(nullfd, 1)
-        os.dup2(nullfd, 2)
-    finally:
-        os.close(nullfd)
 
 class SimpleSMBBackend(object):
     def __init__(self, path, fs):
@@ -73,39 +58,39 @@ class SimpleSMBBackend(object):
 
 class MountError(Exception): pass
 
-def mount_and_run_fs(display_name, create_fs, mount_point,
-                     foreground=False,
-                     smb_only=False,
-                     smb_no_mount=False,
-                     smb_listen_address=None,
-                     on_new_process=None,
-                     fuse_options=None):
-    assert smb_no_mount or mount_point is not None
+def get_func(fully_qualified_fn_name):
+    (create_fs_module, fn_name) = fully_qualified_fn_name.rsplit('.', 1)
+    return getattr(importlib.import_module(create_fs_module), fn_name)
 
-    if not smb_no_mount:
-        mount_point = os.path.abspath(mount_point)
+def create_create_fs(create_fs_params):
+    (create_fs_module, fs_args) = create_fs_params
 
-    # smb_no_mount implies smb
-    if smb_no_mount:
-        smb_only = True
+    create_fs_ = get_func(create_fs_module)
 
-    if not smb_only and run_fuse_mount is not None:
-        log.debug("Attempting fuse mount")
-        try:
-            if fuse_options is None:
-                fuse_options = {}
-            run_fuse_mount(create_fs, mount_point, foreground=foreground,
-                           display_name=display_name, fsname=display_name,
-                           on_init=None if foreground else on_new_process,
-                           **fuse_options)
-            return 0
-        except RuntimeError as e:
-            # Fuse is broken, fall back to SMB
-            pass
+    create_fs = functools.partial(create_fs_, fs_args)
 
-    can_mount_smb_automatically = sys.platform == "darwin"
-    if not smb_no_mount and not can_mount_smb_automatically:
-        raise MountError("Unable to mount file system")
+    if sys.platform == "darwin":
+        orig_create_fs = create_fs
+        def create_fs_():
+            return MacOSPathConversionFileSystem(orig_create_fs())
+
+        create_fs = create_fs_
+
+    return create_fs
+
+def run_smb_server(create_fs_params, mount_signal,
+                   display_name=None,
+                   smb_no_mount=False,
+                   smb_listen_address=None,
+                   mount_point=None,
+                   foreground=False):
+    if create_fs_params is None:
+        raise Exception("need create_fs_module value in environment")
+
+    if display_name is None:
+        raise Exception("need display name argument!")
+
+    create_fs = create_create_fs(create_fs_params)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
@@ -130,55 +115,27 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
 
         sock.bind((host, port))
 
-    if sys.platform == "darwin":
-        orig_create_fs = create_fs
-        def create_fs():
-            return MacOSPathConversionFileSystem(orig_create_fs())
+    server = None
 
-    if smb_no_mount:
-        print("You can access the SMB server at cifs://guest:@%s:%d/%s" %
-              (host,
-               port,
-               display_name))
+    mm_q = queue.Queue()
+    def check_mount():
+        is_mounted = False
 
-    (r, w) = os.pipe()
-
-    def mount_notify(child_pid):
-        # wait for server to startup before attempting mount
-        os.read(r, 1)
         if not smb_no_mount:
             ret = subprocess.call(["mount", "-t", "smbfs",
                                    "cifs://guest:@127.0.0.1:%d/%s" %
                                    (port, display_name),
                                    mount_point])
             if ret:
-                log.debug("Mount failed, Sending kill signal!")
-                os.kill(child_pid, signal.SIGTERM)
-            else:
-                log.debug("Mount succeeded, Sending mounted signal!")
-                os.kill(child_pid, signal.SIGUSR1)
-        else:
-            ret = 0
-        return ret
+                log.debug("Mount failed, killing server")
+                server.close()
+                return
 
-    if not foreground:
-        child_pid = daemonize()
+            is_mounted = True
 
-        if child_pid:
-            os.close(w)
-            return mount_notify(child_pid)
-        elif on_new_process is not None:
-            on_new_process()
+        # give mount signal
+        mount_signal(host, port)
 
-        os.close(r)
-    else:
-        threading.Thread(target=mount_notify, args=(os.getpid(),), daemon=True).start()
-
-    server = None
-
-    mm_q = queue.Queue()
-    def check_mount():
-        is_mounted = False
         while True:
             try:
                 r = mm_q.get(timeout=(None
@@ -187,12 +144,8 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
             except queue.Empty:
                 pass
             else:
-                if r:
-                    log.debug("Setting is_mounted!")
-                    is_mounted = True
-                else:
-                    log.debug("Got kill flag!")
-                    break
+                log.debug("Got kill flag!")
+                break
 
             if is_mounted and not os.path.ismount(mount_point):
                 log.debug("Drive has gone unmounted")
@@ -204,10 +157,6 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
 
         log.debug("CALLING SERVER CLOSE")
         server.close()
-
-    def handle_mounted(self, *_):
-        log.debug("Got mounted signal!")
-        mm_q.put(True)
 
     def kill_signal(self, *_):
         log.debug("Got kill signal!")
@@ -222,10 +171,6 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
         # enable signals now that server is set
         signal.signal(signal.SIGTERM, kill_signal)
         signal.signal(signal.SIGINT, kill_signal)
-        signal.signal(signal.SIGUSR1, handle_mounted)
-
-        # give mount signal
-        os.write(w, b'\0')
 
         threading.Thread(target=check_mount, daemon=True).start()
 
@@ -233,108 +178,194 @@ def mount_and_run_fs(display_name, create_fs, mount_point,
     finally:
         fs.close()
 
-class RealSysLogHandler(logging.Handler):
-    def __init__(self, *n, **kw):
-        super().__init__()
-        syslog.openlog(*n, **kw)
+def main_(argv=None):
+    if argv is None:
+        argv = sys.argv
 
-    def _map_priority(self, levelname):
-        return {
-            logging.DEBUG:    syslog.LOG_DEBUG,
-            logging.INFO:     syslog.LOG_INFO,
-            logging.ERROR:    syslog.LOG_ERR,
-            logging.WARNING:  syslog.LOG_WARNING,
-            logging.CRITICAL: syslog.LOG_CRIT,
-            }[levelname]
+    # to avoid accidental SIGPIPE
+    # redirect stdout to devnull
+    # we have to do it this way because pass_fds is not
+    # supported on windows, but dup() is
+    new_stdout = os.fdopen(os.dup(1), "w")
+    os.close(1)
+    fd = os.open(os.devnull, os.O_WRONLY)
+    if fd != 1:
+        os.dup2(fd, 1)
+        os.close(fd)
 
-    def emit(self, record):
-        msg = self.format(record)
-        priority = self._map_priority(record.levelno)
-        syslog.syslog(priority, msg)
+    create_fs_module = None
+    fs_args = {}
+    smb_no_mount = False
+    smb_listen_address = None
+    mount_point = None
+    display_name = None
+    on_new_process = None
+    proc_args = {}
 
-class FUSEOption(argparse.Action):
-    def __init__(self, **kw):
-        super(FUSEOption, self).__init__(**kw)
-
-    def __call__(self, parser, ns, values, option_string):
-        if ns.o is None:
-            ns.o = {}
-        for kv in values.split(","):
-            ret = kv.split("=", 1)
-            if len(ret) == 2:
-                ns.o[ret[0]] = ret[1]
+    for (key, value) in os.environ.items():
+        if  key.startswith("__userspacefs_fs_arg_"):
+            fs_args[key[len("__userspacefs_fs_arg_"):]] = value
+        elif key.startswith("__userspacefs_proc_arg_"):
+            proc_args[key[len("__userspacefs_proc_arg_"):]] = value
+        elif key == "__userspacefs_onp_module":
+            on_new_process = value
+        elif key == "__userspacefs_create_fs_module":
+            create_fs_module = value
+        elif key == "__userspacefs_smb_no_mount":
+            smb_no_mount = True
+        elif key == "__userspacefs_smb_listen_address":
+            smb_listen_address = value.split(":", 1)
+            if len(smb_listen_address) == 1:
+                smb_listen_address = list(smb_listen_address) + [None]
             else:
-                ns.o[ret[0]] = True
+                smb_listen_address = (smb_listen_address[0], int(smb_listen_address[1]))
+        elif key == "__userspacefs_mount_point":
+            mount_point = value
+        elif key == "__userspacefs_display_name":
+            display_name = value
 
-def add_cli_arguments(parser):
-    def ensure_listen_address(string):
-        try:
-            (host, port) = string.split(":", 1)
-        except ValueError:
-            try:
-                port = int(string)
-                if not (0 < port < 65536):
-                    raise ValueError()
-            except ValueError:
-                host = string
-                port = None
-            else:
-                host = ''
-        else:
-            if port:
-                port = int(port)
-                if not (0 < port < 65536):
-                    raise argparse.ArgumentTypeError("%r is not a valid TCP port" % (port,))
-            else:
-                port = None
+    if on_new_process is not None:
+        get_func(on_new_process)(proc_args)
 
-        if not host:
-            host = "127.0.0.1"
+    # get fs_args from env
+    def mount_signal(host, port):
+        print("mounted %s %d" % (host, port), file=new_stdout, flush=True)
+        # new_stdout will not be used anymore
+        new_stdout.close()
 
-        return (host, port)
+    run_smb_server((create_fs_module, fs_args), mount_signal,
+                   display_name=display_name,
+                   smb_no_mount=smb_no_mount,
+                   smb_listen_address=smb_listen_address,
+                   mount_point=mount_point)
 
-    parser.add_argument("-f", "--foreground", action="store_true",
-                        help="keep filesystem server in foreground")
-    parser.add_argument("-v", "--verbose", action="count", default=0,
-                        help="show log messages, use twice for maximum verbosity")
-    parser.add_argument("-s", "--smb", action="store_true",
-                        help="force mounting via SMB")
-    parser.add_argument("-n", "--smb-no-mount", action="store_true",
-                        help="export filesystem via SMB but don't mount it")
-    parser.add_argument("-l", "--smb-listen-address", default="127.0.0.1",
-                        type=ensure_listen_address,
-                        help="address that SMB service should listen on, append colon to specify port")
-    parser.add_argument("-o", metavar='opt,[opt...]', action=FUSEOption,
-                        help="FUSE options, e.g. -o uid=1000,allow_other")
+    return 0
 
-def simple_main(mount_point, display_name, create_fs, args=None, argv=None, on_new_process=None):
-    if args is None:
-        if argv is None:
-            argv = sys.argv
-
-        parser = argparse.ArgumentParser()
-        add_cli_arguments(parser)
-        args = parser.parse_args(argv[1:])
-
-    if args.foreground:
-        format_ = '%(asctime)s:%(levelname)s:%(name)s:%(message)s'
-        logging_stream = logging.StreamHandler()
-    else:
-        format_ = '%(levelname)s:%(name)s:%(message)s'
-        logging_stream = RealSysLogHandler(display_name, syslog.LOG_PID)
-
-    level = [logging.WARNING, logging.INFO, logging.DEBUG][min(2, args.verbose)]
-    logging.basicConfig(level=level, handlers=[logging_stream], format=format_)
-
+def main(argv=None):
     try:
-        return mount_and_run_fs(display_name, create_fs,
+        return main_(argv=argv)
+    except Exception:
+        logging.exception("unexpected exception")
+        return -1
+
+def mount_and_run_fs(display_name, create_fs_params, mount_point,
+                     on_new_process=None,
+                     foreground=False,
+                     smb_only=False,
+                     smb_no_mount=False,
+                     smb_listen_address=None,
+                     fuse_options=None):
+    assert smb_no_mount or mount_point is not None
+
+    if not smb_no_mount:
+        mount_point = os.path.abspath(mount_point)
+
+    # smb_no_mount implies smb
+    if smb_no_mount:
+        smb_only = True
+
+    if not smb_only and run_fuse_mount is not None:
+        log.debug("Attempting fuse mount")
+        try:
+            if fuse_options is None:
+                fuse_options = {}
+            run_fuse_mount(create_create_fs(create_fs_params), mount_point, foreground=foreground,
+                           display_name=display_name, fsname=display_name,
+                           **fuse_options)
+            return 0
+        except RuntimeError as e:
+            # Fuse is broken, fall back to SMB
+            pass
+
+    can_mount_smb_automatically = sys.platform == "darwin"
+    if not smb_no_mount and not can_mount_smb_automatically:
+        raise MountError("Unable to mount file system")
+
+    def no_auto_mount_message(host, port):
+        if smb_no_mount:
+            print("You can access the SMB server at cifs://guest:@%s:%d/%s" %
+                  (host,
+                   port,
+                   display_name))
+
+    if not foreground:
+        if sys.executable is None:
+            raise Exception("need a path to the executable!")
+
+        for (key, value) in create_fs_params[1].items():
+            os.environ['__userspacefs_fs_arg_' + key] = value
+
+        os.environ['__userspacefs_create_fs_module'] = create_fs_params[0]
+
+        if on_new_process is not None:
+            for (key, value) in on_new_process[1].items():
+                os.environ['__userspacefs_proc_arg_' + key] = value
+
+            os.environ['__userspacefs_onp_module'] = on_new_process[0]
+        if smb_no_mount:
+            os.environ['__userspacefs_smb_no_mount'] = '1'
+        if smb_listen_address is not None:
+            ser = smb_listen_address[0]
+            if smb_listen_address[1] is not None:
+                ser += ":%d" % (smb_listen_address[1],)
+            os.environ['__userspacefs_smb_listen_address'] = ser
+        if mount_point is not None:
+            os.environ["__userspacefs_mount_point"] = mount_point
+        if display_name is not None:
+            os.environ["__userspacefs_display_name"] = display_name
+
+        proc = subprocess.Popen([sys.executable, __file__],
+                                text=1,
+                                stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL,
+                                start_new_session=True,
+                                cwd=pathlib.Path.cwd().root)
+
+        # wait for proc to get mounted\n (signaled by writing mounted stdout)
+        # or for proc to die
+        ret = 1
+        while True:
+            buf = proc.stdout.readline()
+            if not buf:
+                ret = proc.poll()
+                break
+
+            mo = re.search(r"^mounted\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+)\s*$", buf)
+            if mo is not None:
+                host = mo[1]
+                port = int(mo[2])
+                no_auto_mount_message(host, port)
+                ret = 0
+                break
+
+        return ret
+
+    run_smb_server(create_fs_params, no_auto_mount_message,
+                   smb_no_mount=smb_no_mount, smb_listen_address=smb_listen_address,
+                   mount_point=mount_point, display_name=display_name, foreground=True)
+
+    return 0
+
+def simple_main(mount_point, display_name, create_fs_params,
+                on_new_process=None,
+                foreground=False,
+                smb_only=False,
+                smb_no_mount=False,
+                smb_listen_address=None,
+                fuse_options=None):
+    try:
+        return mount_and_run_fs(display_name, create_fs_params,
                                 mount_point,
-                                foreground=args.foreground,
-                                smb_only=args.smb,
-                                smb_no_mount=args.smb_no_mount,
-                                smb_listen_address=args.smb_listen_address,
                                 on_new_process=on_new_process,
-                                fuse_options=args.o)
+                                foreground=foreground,
+                                smb_only=smb_only,
+                                smb_no_mount=smb_no_mount,
+                                smb_listen_address=smb_listen_address,
+                                fuse_options=fuse_options)
     except MountError as e:
         print(e)
         return -1
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
