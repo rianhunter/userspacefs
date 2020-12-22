@@ -311,7 +311,7 @@ def mount_and_run_fs(display_name, create_fs_params, mount_point,
 
     can_mount_smb_automatically = sys.platform == "darwin"
     if (smb_only or run_fuse_mount is None) and not smb_no_mount and not can_mount_smb_automatically:
-        raise MountError("Unable to mount file system")
+        raise MountError("Don't know how to automatically mount the file system on this platform. Run with --smb-no-mount")
 
     def no_auto_mount_message(hostport=None):
         if smb_no_mount:
