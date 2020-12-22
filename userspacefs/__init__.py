@@ -134,7 +134,7 @@ def run_smb_server(create_fs_params, mount_signal,
             is_mounted = True
 
         # give mount signal
-        mount_signal(host, port)
+        mount_signal((host, port))
 
         while True:
             try:
@@ -178,6 +178,36 @@ def run_smb_server(create_fs_params, mount_signal,
     finally:
         fs.close()
 
+def run_mount(create_fs_params, mount_point,
+              foreground=False,
+              display_name=None,
+              fuse_options=None,
+              smb_no_mount=False,
+              smb_listen_address=None,
+              smb_only=False,
+              mount_signal=None):
+    if not smb_only and run_fuse_mount is not None:
+        log.debug("Attempting fuse mount")
+        try:
+            if fuse_options is None:
+                fuse_options = {}
+
+            # foreground=True here is not a error, run_mount() always runs in
+            # foreground, the kwarg is for run_smb_server()
+            run_fuse_mount(create_create_fs(create_fs_params), mount_point, foreground=True,
+                           display_name=display_name, fsname=display_name, on_init=mount_signal,
+                           **fuse_options)
+            return 0
+        except RuntimeError as e:
+            # Fuse is broken, fall back to SMB
+            pass
+
+    run_smb_server(create_fs_params, mount_signal=mount_signal,
+                   smb_no_mount=smb_no_mount, smb_listen_address=smb_listen_address,
+                   mount_point=mount_point, display_name=display_name, foreground=foreground)
+
+    return 0
+
 def main_(argv=None):
     if argv is None:
         argv = sys.argv
@@ -201,6 +231,8 @@ def main_(argv=None):
     display_name = None
     on_new_process = None
     proc_args = {}
+    smb_only = False
+    fuse_options = {}
 
     for (key, value) in os.environ.items():
         if  key.startswith("__userspacefs_fs_arg_"):
@@ -223,21 +255,34 @@ def main_(argv=None):
             mount_point = value
         elif key == "__userspacefs_display_name":
             display_name = value
+        elif key == "__userspacefs_smb_only":
+            smb_only = True
+        elif key.startswith("__userspacefs_fuse_opt_"):
+            fuse_options[key[len("__userspacefs_fuse_opt_"):]] = value
 
     if on_new_process is not None:
         get_func(on_new_process)(proc_args)
 
     # get fs_args from env
-    def mount_signal(host, port):
-        print("mounted %s %d" % (host, port), file=new_stdout, flush=True)
+    create_fs_params = (create_fs_module, fs_args)
+
+    def mount_signal(hostport=None):
+        if hostport is not None:
+            (host, port) = hostport
+            print("mounted %s %d" % (host, port), file=new_stdout, flush=True)
+        else:
+            print("mounted", file=new_stdout, flush=True)
         # new_stdout will not be used anymore
         new_stdout.close()
 
-    run_smb_server((create_fs_module, fs_args), mount_signal,
-                   display_name=display_name,
-                   smb_no_mount=smb_no_mount,
-                   smb_listen_address=smb_listen_address,
-                   mount_point=mount_point)
+    run_mount(create_fs_params, mount_point,
+              foreground=False,
+              mount_signal=mount_signal,
+              display_name=display_name,
+              smb_no_mount=smb_no_mount,
+              smb_listen_address=smb_listen_address,
+              smb_only=smb_only,
+              fuse_options=fuse_options)
 
     return 0
 
@@ -264,25 +309,14 @@ def mount_and_run_fs(display_name, create_fs_params, mount_point,
     if smb_no_mount:
         smb_only = True
 
-    if not smb_only and run_fuse_mount is not None:
-        log.debug("Attempting fuse mount")
-        try:
-            if fuse_options is None:
-                fuse_options = {}
-            run_fuse_mount(create_create_fs(create_fs_params), mount_point, foreground=foreground,
-                           display_name=display_name, fsname=display_name,
-                           **fuse_options)
-            return 0
-        except RuntimeError as e:
-            # Fuse is broken, fall back to SMB
-            pass
-
     can_mount_smb_automatically = sys.platform == "darwin"
-    if not smb_no_mount and not can_mount_smb_automatically:
+    if (smb_only or run_fuse_mount is None) and not smb_no_mount and not can_mount_smb_automatically:
         raise MountError("Unable to mount file system")
 
-    def no_auto_mount_message(host, port):
+    def no_auto_mount_message(hostport=None):
         if smb_no_mount:
+            assert hostport is not None
+            (host, port) = hostport
             print("You can access the SMB server at cifs://guest:@%s:%d/%s" %
                   (host,
                    port,
@@ -313,6 +347,11 @@ def mount_and_run_fs(display_name, create_fs_params, mount_point,
             os.environ["__userspacefs_mount_point"] = mount_point
         if display_name is not None:
             os.environ["__userspacefs_display_name"] = display_name
+        if fuse_options is not None:
+            for (key, value) in fuse_options.items():
+                os.environ['__userspacefs_fuse_opt_' + key] = value
+        if smb_only:
+            os.environ['__userspacefs_smb_only'] = '1'
 
         proc = subprocess.Popen([sys.executable, __file__],
                                 text=1,
@@ -331,19 +370,26 @@ def mount_and_run_fs(display_name, create_fs_params, mount_point,
                 ret = proc.poll()
                 break
 
-            mo = re.search(r"^mounted\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+)\s*$", buf)
+            mo = re.search(r"^mounted(\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+))?\s*$", buf)
             if mo is not None:
-                host = mo[1]
-                port = int(mo[2])
-                no_auto_mount_message(host, port)
+                if mo[1] is not None:
+                    hostport = (mo[2], int(mo[3]))
+                else:
+                    hostport = None
+                no_auto_mount_message(hostport)
                 ret = 0
                 break
 
         return ret
 
-    run_smb_server(create_fs_params, no_auto_mount_message,
-                   smb_no_mount=smb_no_mount, smb_listen_address=smb_listen_address,
-                   mount_point=mount_point, display_name=display_name, foreground=True)
+    run_mount(create_fs_params, mount_point,
+              foreground=True,
+              mount_signal=no_auto_mount_message,
+              display_name=display_name,
+              fuse_options=fuse_options,
+              smb_no_mount=smb_no_mount,
+              smb_listen_address=smb_listen_address,
+              smb_only=smb_only)
 
     return 0
 
