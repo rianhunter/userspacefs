@@ -353,7 +353,7 @@ def mount_and_run_fs(display_name, create_fs_params, mount_point,
         if smb_only:
             os.environ['__userspacefs_smb_only'] = '1'
 
-        proc = subprocess.Popen([sys.executable, __file__],
+        proc = subprocess.Popen([sys.executable, "-c", "from userspacefs import main; main()"],
                                 text=1,
                                 stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE,
