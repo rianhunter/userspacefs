@@ -234,6 +234,7 @@ def main_(argv=None):
     smb_only = False
     fuse_options = {}
 
+    # get fs_args from env
     for (key, value) in os.environ.items():
         if  key.startswith("__userspacefs_fs_arg_"):
             fs_args[key[len("__userspacefs_fs_arg_"):]] = value
@@ -263,7 +264,6 @@ def main_(argv=None):
     if on_new_process is not None:
         get_func(on_new_process)(proc_args)
 
-    # get fs_args from env
     create_fs_params = (create_fs_module, fs_args)
 
     def mount_signal(hostport=None):
